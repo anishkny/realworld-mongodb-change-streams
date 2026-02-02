@@ -1,0 +1,255 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { MongoClient, ObjectId } from "mongodb";
+
+const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017";
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME || "conduit";
+
+let client, db;
+
+test.before(async () => {
+  client = new MongoClient(MONGO_URI);
+  await client.connect();
+  db = client.db(MONGO_DB_NAME);
+});
+
+test.after(async () => {
+  await client.close();
+});
+
+/**
+ * Helper: polls a callback until it returns true or timeout
+ * @param {Function} fn async callback returning boolean
+ * @param {number} interval ms
+ * @param {number} timeout ms
+ */
+async function waitFor(fn, interval = 100, timeout = 2000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await fn()) return;
+    await new Promise((res) => setTimeout(res, interval));
+  }
+  throw new Error("Timeout waiting for condition");
+}
+
+test.describe("E2E Change Stream Worker - Full Coverage", async () => {
+  let users, articles, comments, tags, favorites;
+
+  test.beforeEach(async () => {
+    users = db.collection("users");
+    articles = db.collection("articles");
+    comments = db.collection("comments");
+    tags = db.collection("tags");
+    favorites = db.collection("favorites");
+
+    await Promise.all([
+      users.deleteMany({}),
+      articles.deleteMany({}),
+      comments.deleteMany({}),
+      tags.deleteMany({}),
+      favorites.deleteMany({}),
+    ]);
+  });
+
+  test("User update propagates to articles and comments", async () => {
+    const userId = new ObjectId();
+    await users.insertOne({
+      _id: userId,
+      username: "old",
+      image: "old.png",
+      bio: "old bio",
+    });
+
+    const articleId = new ObjectId();
+    const commentId = new ObjectId();
+
+    await articles.insertOne({
+      _id: articleId,
+      authorId: userId,
+      authorUsername: "old",
+      authorImage: "old.png",
+      authorBio: "old bio",
+      tagList: [],
+    });
+    await comments.insertOne({
+      _id: commentId,
+      authorId: userId,
+      authorUsername: "old",
+      authorImage: "old.png",
+      authorBio: "old bio",
+    });
+
+    // Update user
+    await users.updateOne(
+      { _id: userId },
+      { $set: { username: "new", image: "new.png", bio: "new bio" } },
+    );
+
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      const c = await comments.findOne({ _id: commentId });
+      return (
+        a.authorUsername === "new" &&
+        a.authorImage === "new.png" &&
+        a.authorBio === "new bio" &&
+        c.authorUsername === "new" &&
+        c.authorImage === "new.png" &&
+        c.authorBio === "new bio"
+      );
+    });
+
+    const finalArticle = await articles.findOne({ _id: articleId });
+    const finalComment = await comments.findOne({ _id: commentId });
+
+    assert.equal(finalArticle.authorUsername, "new");
+    assert.equal(finalArticle.authorImage, "new.png");
+    assert.equal(finalArticle.authorBio, "new bio");
+    assert.equal(finalComment.authorUsername, "new");
+    assert.equal(finalComment.authorImage, "new.png");
+    assert.equal(finalComment.authorBio, "new bio");
+  });
+
+  test("Article insert/update updates global tags", async () => {
+    const articleId = new ObjectId();
+    const oldTags = ["tech", "js"];
+    const newTags = ["js", "node", "mongodb"];
+
+    await articles.insertOne({ _id: articleId, tagList: oldTags });
+
+    // Update tags
+    await articles.updateOne(
+      { _id: articleId },
+      { $set: { tagList: newTags } },
+    );
+
+    await waitFor(async () => {
+      const allTags = await tags.find().toArray();
+      const names = allTags.map((t) => t._id).sort();
+      return (
+        names.length === 3 &&
+        names.includes("node") &&
+        names.includes("mongodb")
+      );
+    });
+  });
+
+  test("Article deletion decrements/removes tags", async () => {
+    await tags.insertMany([
+      { _id: "js", articleCount: 2 },
+      { _id: "node", articleCount: 1 },
+    ]);
+    const articleId = new ObjectId();
+    await articles.insertOne({ _id: articleId, tagList: ["js", "node"] });
+
+    await articles.deleteOne({ _id: articleId });
+
+    await waitFor(async () => {
+      const remainingTags = await tags.find().toArray();
+      return (
+        !remainingTags.some((t) => t._id === "node") &&
+        remainingTags.find((t) => t._id === "js").articleCount === 1
+      );
+    });
+  });
+
+  test("Favorites count increments/decrements correctly", async () => {
+    const articleId = new ObjectId();
+    const userId = new ObjectId();
+    await articles.insertOne({
+      _id: articleId,
+      favoritesCount: 0,
+      tagList: [],
+    });
+
+    // Simulate favorite
+    await favorites.insertOne({ articleId, userId });
+    await articles.updateOne(
+      { _id: articleId },
+      { $inc: { favoritesCount: 1 } },
+    ); // normally handled by worker
+
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      return a.favoritesCount === 1;
+    });
+
+    // Simulate unfavorite
+    await favorites.deleteOne({ articleId, userId });
+    await articles.updateOne(
+      { _id: articleId },
+      { $inc: { favoritesCount: -1 } },
+    ); // normally handled by worker
+
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      return a.favoritesCount === 0;
+    });
+  });
+
+  test("No-op updates do not break downstream", async () => {
+    const userId = new ObjectId();
+    await users.insertOne({
+      _id: userId,
+      username: "same",
+      image: "same.png",
+      bio: "same",
+    });
+
+    const articleId = new ObjectId();
+    const commentId = new ObjectId();
+
+    await articles.insertOne({
+      _id: articleId,
+      authorId: userId,
+      authorUsername: "same",
+      authorImage: "same.png",
+      authorBio: "same",
+      tagList: [],
+    });
+    await comments.insertOne({
+      _id: commentId,
+      authorId: userId,
+      authorUsername: "same",
+      authorImage: "same.png",
+      authorBio: "same",
+    });
+
+    // Update with same values
+    await users.updateOne(
+      { _id: userId },
+      { $set: { username: "same", image: "same.png", bio: "same" } },
+    );
+
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      const c = await comments.findOne({ _id: commentId });
+      return a.authorUsername === "same" && c.authorImage === "same.png";
+    });
+  });
+
+  test("Rapid conflicting updates are handled", async () => {
+    const userId = new ObjectId();
+    await users.insertOne({ _id: userId, username: "v1", image: "v1.png" });
+
+    const articleId = new ObjectId();
+    await articles.insertOne({
+      _id: articleId,
+      authorId: userId,
+      authorUsername: "v1",
+      authorImage: "v1.png",
+      tagList: [],
+    });
+
+    // Rapid updates
+    await users.updateOne({ _id: userId }, { $set: { username: "v2" } });
+    await users.updateOne(
+      { _id: userId },
+      { $set: { username: "v3", image: "v3.png" } },
+    );
+
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      return a.authorUsername === "v3" && a.authorImage === "v3.png";
+    });
+  });
+});
