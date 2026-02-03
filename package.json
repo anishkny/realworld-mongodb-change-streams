@@ -1,6 +1,13 @@
 {
   "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test index.test.js"
+  },
   "dependencies": {
     "mongodb": "^7.0.0"
+  },
+  "devDependencies": {
+    "dotenv-extended": "^2.9.0"
   }
 }

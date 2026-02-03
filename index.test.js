@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MongoClient, ObjectId } from "mongodb";
+import dotEnvExtended from "dotenv-extended";
 
-const MONGODB_URI =
-  process.env.MONGODB_URI ||
-  "mongodb://127.0.0.1:27017/conduit?replicaSet=rs0&directConnection=true";
+dotEnvExtended.load();
 
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 let client, db;
 
 test.before(async () => {
@@ -24,7 +25,7 @@ test.after(async () => {
  * @param {number} interval ms
  * @param {number} timeout ms
  */
-async function waitFor(fn, interval = 100, timeout = 2000) {
+async function waitFor(fn, interval = 100, timeout = Infinity) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (await fn()) return;

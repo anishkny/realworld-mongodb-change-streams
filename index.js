@@ -1,9 +1,9 @@
+import dotEnvExtended from "dotenv-extended";
 import { MongoClient } from "mongodb";
 
-const MONGODB_URI =
-  process.env.MONGODB_URI ||
-  "mongodb://127.0.0.1:27017/conduit?replicaSet=rs0&directConnection=true";
+dotEnvExtended.load();
 
+const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
 const client = new MongoClient(MONGODB_URI);
@@ -17,6 +17,10 @@ async function main() {
   const commentsCollection = db.collection("comments");
   const tagsCollection = db.collection("tags");
   const stateCollection = db.collection("sync_state");
+
+  // Enable changeStreamPreAndPostImages for users and articles collections
+  await ensurePreAndPostImages(db, "users");
+  await ensurePreAndPostImages(db, "articles");
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
@@ -68,6 +72,8 @@ async function main() {
       }
     }
   })();
+
+  console.log("Change streams set up and running.");
 }
 
 // --- USERS CHANGE HANDLER ---
@@ -117,10 +123,28 @@ async function handleArticleChange(change, tagsCol) {
       { $inc: { articleCount: -1 } },
       { returnDocument: "after" },
     );
-    if (res.value?.articleCount <= 0) {
+    if (res?.articleCount <= 0) {
       await tagsCol.deleteOne({ _id: t });
     }
   }
+}
+
+async function ensurePreAndPostImages(db, collectionName) {
+  const collections = await db
+    .listCollections({ name: collectionName }, { nameOnly: true })
+    .toArray();
+
+  if (collections.length === 0) {
+    await db.createCollection(collectionName, {
+      changeStreamPreAndPostImages: { enabled: true },
+    });
+    return;
+  }
+
+  await db.command({
+    collMod: collectionName,
+    changeStreamPreAndPostImages: { enabled: true },
+  });
 }
 
 main().catch((err) => {
