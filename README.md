@@ -1,4 +1,4 @@
-# RealWorld MongoDB Change Stream
+# RealWorld MongoDB Change Streams
 
 This repository demonstrates how to use MongoDB Change Streams to keep denormalized data in sync for a RealWorld-style backend.
 
