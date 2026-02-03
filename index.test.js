@@ -2,15 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MongoClient, ObjectId } from "mongodb";
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017";
-const MONGO_DB_NAME = process.env.MONGO_DB_NAME || "conduit";
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb://127.0.0.1:27017/conduit?replicaSet=rs0&directConnection=true";
 
 let client, db;
 
 test.before(async () => {
-  client = new MongoClient(MONGO_URI);
+  client = new MongoClient(MONGODB_URI);
   await client.connect();
-  db = client.db(MONGO_DB_NAME);
+  db = client.db();
 });
 
 test.after(async () => {
