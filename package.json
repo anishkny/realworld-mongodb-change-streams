@@ -2,7 +2,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test index.test.js"
+    "test:only": "node --test index.test.js",
+    "test": "./start-and-test.sh"
   },
   "dependencies": {
     "mongodb": "^7.0.0"

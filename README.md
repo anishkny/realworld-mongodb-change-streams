@@ -4,6 +4,15 @@ This repository demonstrates how to use MongoDB Change Streams to keep denormali
 
 It focuses only on the change stream worker, not on HTTP APIs, authentication, or frontend code.
 
+## Quick start
+
+```bash
+npm install
+./start-mongodb.sh
+npm start &
+npm run test:only
+```
+
 ## What this demonstrates
 
 A minimal but realistic pattern for MongoDB-backed applications that:
@@ -39,10 +48,8 @@ Source of truth:
 
 Derived and denormalized:
 
-- articles.authorUsername
-- articles.authorImage
-- articles.authorBio
-- comments.author fields
+- articles.author fields (username, bio, image)
+- comments.author fields (username, bio, image)
 - articles.favoritesCount
 - tags (global tag list with article counts)
 
@@ -50,12 +57,9 @@ Derived and denormalized:
 
 The change stream worker:
 
-- Watches users
-- Propagates profile changes to articles and comments
-- Watches articles
-- Maintains the global tag list and tag article counts
-- Watches favorites
-- Increments and decrements articles.favoritesCount
+- Watches users & propagates profile changes to articles and comments
+- Watches articles & maintains the global tag list and tag article counts
+- Watches favorites & maintains articles.favoritesCount
 
 There are no synchronous cross-collection updates and no multi-document transactions.
 
@@ -72,9 +76,17 @@ This is the tradeoff used by most high-scale MongoDB systems.
 
 The worker attaches to MongoDB and begins reacting to changes immediately once started.
 
+```bash
+npm start
+```
+
 ## Testing
 
 End-to-end tests use a real MongoDB instance and assume the worker is already running.
+
+```bash
+npm test
+```
 
 Tests validate that:
 

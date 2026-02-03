@@ -7,6 +7,7 @@ dotEnvExtended.load();
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
+
 let client, db;
 
 test.before(async () => {
@@ -19,24 +20,10 @@ test.after(async () => {
   await client.close();
 });
 
-/**
- * Helper: polls a callback until it returns true or timeout
- * @param {Function} fn async callback returning boolean
- * @param {number} interval ms
- * @param {number} timeout ms
- */
-async function waitFor(fn, interval = 100, timeout = Infinity) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (await fn()) return;
-    await new Promise((res) => setTimeout(res, interval));
-  }
-  throw new Error("Timeout waiting for condition");
-}
-
-test.describe("E2E Change Stream Worker - Full Coverage", async () => {
+test.describe("Change Stream Worker E2E", async () => {
   let users, articles, comments, tags, favorites;
 
+  // Clean collections before each test
   test.beforeEach(async () => {
     users = db.collection("users");
     articles = db.collection("articles");
@@ -255,3 +242,22 @@ test.describe("E2E Change Stream Worker - Full Coverage", async () => {
     });
   });
 });
+
+// --------------------------------------------------------------------------------
+// HELPERS
+// --------------------------------------------------------------------------------
+
+/**
+ * Helper: polls a callback until it returns true or timeout
+ * @param {Function} fn async callback returning boolean
+ * @param {number} interval ms
+ * @param {number} timeout ms
+ */
+async function waitFor(fn, interval = 100, timeout = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await fn()) return;
+    await new Promise((res) => setTimeout(res, interval));
+  }
+  throw new Error("Timeout waiting for condition");
+}
