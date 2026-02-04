@@ -35,7 +35,12 @@ function createShardingPipeline(shardCount, shardIndex) {
       $match: {
         $expr: {
           $eq: [
-            { $mod: [{ $toHashedIndexKey: "$documentKey._id" }, shardCount] },
+            {
+              $mod: [
+                { $abs: { $toLong: { $toHashedIndexKey: "$documentKey._id" } } },
+                shardCount,
+              ],
+            },
             shardIndex,
           ],
         },
@@ -64,7 +69,8 @@ async function main() {
   await ensurePreAndPostImages(db, "favorites");
 
   // --- USERS STREAM ---
-  const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
+  const userStateId = `user_profile_sync_shard_${SHARD_INDEX}`;
+  const userState = await stateCollection.findOne({ _id: userStateId });
   const userStream = usersCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     resumeAfter: userState?.resumeToken,
@@ -77,7 +83,7 @@ async function main() {
         await handleUserChange(change, articlesCollection, commentsCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "user_profile_sync" },
+          { _id: userStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
@@ -88,8 +94,9 @@ async function main() {
   })();
 
   // --- ARTICLES STREAM ---
+  const articleStateId = `article_tag_sync_shard_${SHARD_INDEX}`;
   const articleState = await stateCollection.findOne({
-    _id: "article_tag_sync",
+    _id: articleStateId,
   });
   const articleStream = articlesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
@@ -104,7 +111,7 @@ async function main() {
         await handleArticleChange(change, tagsCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "article_tag_sync" },
+          { _id: articleStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
@@ -115,8 +122,9 @@ async function main() {
   })();
 
   // --- FAVORITES STREAM ---
+  const favoritesStateId = `favorites_count_sync_shard_${SHARD_INDEX}`;
   const favoritesState = await stateCollection.findOne({
-    _id: "favorites_count_sync",
+    _id: favoritesStateId,
   });
   const favoritesStream = favoritesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
@@ -131,7 +139,7 @@ async function main() {
         await handleFavoriteChange(change, articlesCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "favorites_count_sync" },
+          { _id: favoritesStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
