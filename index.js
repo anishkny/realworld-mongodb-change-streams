@@ -20,9 +20,7 @@ async function main() {
   const stateCollection = db.collection("sync_state");
 
   // Enable changeStreamPreAndPostImages for users and articles collections
-  await ensurePreAndPostImages(db, "users");
-  await ensurePreAndPostImages(db, "articles");
-  await ensurePreAndPostImages(db, "favorites");
+  await ensurePreAndPostImages(db, ["users", "articles", "favorites"]);
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
@@ -183,22 +181,32 @@ async function handleFavoriteChange(change, articlesCol) {
   }
 }
 
-async function ensurePreAndPostImages(db, collectionName) {
+async function ensurePreAndPostImages(db, collectionNames) {
+  // Get existing collections (name only)
   const collections = await db
-    .listCollections({ name: collectionName }, { nameOnly: true })
+    .listCollections({}, { nameOnly: true })
     .toArray();
 
-  if (collections.length === 0) {
-    await db.createCollection(collectionName, {
+  for (const collectionName of collectionNames) {
+    // Check if collection exists
+    const collectionExists = collections.some(
+      (col) => col.name === collectionName,
+    );
+
+    // Create collection if it doesn't exist
+    if (!collectionExists) {
+      await db.createCollection(collectionName, {
+        changeStreamPreAndPostImages: { enabled: true },
+      });
+      return;
+    }
+
+    // Ensure changeStreamPreAndPostImages is enabled
+    await db.command({
+      collMod: collectionName,
       changeStreamPreAndPostImages: { enabled: true },
     });
-    return;
   }
-
-  await db.command({
-    collMod: collectionName,
-    changeStreamPreAndPostImages: { enabled: true },
-  });
 }
 
 main().catch((err) => {
