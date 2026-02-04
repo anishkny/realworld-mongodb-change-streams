@@ -8,7 +8,7 @@ if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
 const SHARD_COUNT = process.env.SHARD_COUNT
   ? parseInt(process.env.SHARD_COUNT)
-  : 4;
+  : 1;
 const SHARD_INDEX = process.env.SHARD_INDEX
   ? parseInt(process.env.SHARD_INDEX)
   : 0;
