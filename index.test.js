@@ -157,7 +157,7 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
     });
   });
 
-  it.skip("should compute favorites count correctly", async () => {
+  it("should compute favorites count correctly", async () => {
     const articleId = new ObjectId();
     const userId = new ObjectId();
     await articles.insertOne({
@@ -168,10 +168,6 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
 
     // Simulate favorite
     await favorites.insertOne({ articleId, userId });
-    await articles.updateOne(
-      { _id: articleId },
-      { $inc: { favoritesCount: 1 } },
-    ); // normally handled by worker
 
     await waitFor(async () => {
       const a = await articles.findOne({ _id: articleId });
@@ -180,10 +176,6 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
 
     // Simulate unfavorite
     await favorites.deleteOne({ articleId, userId });
-    await articles.updateOne(
-      { _id: articleId },
-      { $inc: { favoritesCount: -1 } },
-    ); // normally handled by worker
 
     await waitFor(async () => {
       const a = await articles.findOne({ _id: articleId });

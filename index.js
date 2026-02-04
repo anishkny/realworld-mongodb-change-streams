@@ -16,6 +16,7 @@ async function main() {
   const articlesCollection = db.collection("articles");
   const commentsCollection = db.collection("comments");
   const tagsCollection = db.collection("tags");
+  const favoritesCollection = db.collection("favorites");
   const stateCollection = db.collection("sync_state");
 
   // Enable changeStreamPreAndPostImages for users and articles collections
@@ -73,6 +74,32 @@ async function main() {
     }
   })();
 
+  // --- FAVORITES STREAM ---
+  const favoritesState = await stateCollection.findOne({
+    _id: "favorites_count_sync",
+  });
+  const favoritesStream = favoritesCollection.watch([], {
+    fullDocument: "updateLookup",
+    resumeAfter: favoritesState?.resumeToken,
+  });
+
+  (async () => {
+    console.log("Watching favorites for articles count...");
+    for await (const change of favoritesStream) {
+      try {
+        await handleFavoriteChange(change, articlesCollection);
+        // save resume token
+        await stateCollection.updateOne(
+          { _id: "favorites_count_sync" },
+          { $set: { resumeToken: change._id } },
+          { upsert: true },
+        );
+      } catch (err) {
+        console.error("Favorite change processing error:", err);
+      }
+    }
+  })();
+
   console.log("Change streams set up and running.");
 }
 
@@ -125,6 +152,31 @@ async function handleArticleChange(change, tagsCol) {
     );
     if (res?.articleCount <= 0) {
       await tagsCol.deleteOne({ _id: t });
+    }
+  }
+}
+
+// --- FAVORITES CHANGE HANDLER ---
+async function handleFavoriteChange(change, articlesCol) {
+  const operationType = change.operationType;
+  
+  if (operationType === "insert") {
+    // Favorite added: increment article's favoritesCount
+    const articleId = change.fullDocument?.articleId;
+    if (articleId) {
+      await articlesCol.updateOne(
+        { _id: articleId },
+        { $inc: { favoritesCount: 1 } },
+      );
+    }
+  } else if (operationType === "delete") {
+    // Favorite removed: decrement article's favoritesCount
+    const articleId = change.documentKey?.articleId;
+    if (articleId) {
+      await articlesCol.updateOne(
+        { _id: articleId },
+        { $inc: { favoritesCount: -1 } },
+      );
     }
   }
 }
