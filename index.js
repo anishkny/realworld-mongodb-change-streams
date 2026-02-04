@@ -27,6 +27,9 @@ if (SHARD_INDEX >= SHARD_COUNT) {
 const client = new MongoClient(MONGODB_URI);
 
 function createShardingPipeline(shardCount, shardIndex) {
+  if (shardCount === 1) {
+    return [];
+  }
   return [
     {
       $match: {
