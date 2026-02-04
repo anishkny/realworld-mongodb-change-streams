@@ -20,7 +20,9 @@ async function main() {
   const stateCollection = db.collection("sync_state");
 
   // Enable changeStreamPreAndPostImages for users and articles collections
-  await ensurePreAndPostImages(db, ["users", "articles", "favorites"]);
+  await ensurePreAndPostImages(db, "users");
+  await ensurePreAndPostImages(db, "articles");
+  await ensurePreAndPostImages(db, "favorites");
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
@@ -110,6 +112,7 @@ function profileChanged(change) {
 }
 
 async function handleUserChange(change, articlesCol, commentsCol) {
+  process.stdout.write("[U]");
   if (!profileChanged(change)) return;
   const userId = change.documentKey._id;
   const { username, image, bio } = change.fullDocument;
@@ -120,7 +123,6 @@ async function handleUserChange(change, articlesCol, commentsCol) {
   if (bio) update.authorBio = bio;
   if (Object.keys(update).length === 0) return;
 
-  console.log(`Syncing profile for user ${userId}`);
   await Promise.all([
     articlesCol.updateMany({ authorId: userId }, { $set: update }),
     commentsCol.updateMany({ authorId: userId }, { $set: update }),
@@ -129,6 +131,7 @@ async function handleUserChange(change, articlesCol, commentsCol) {
 
 // --- ARTICLES CHANGE HANDLER (tags) ---
 async function handleArticleChange(change, tagsCol) {
+  process.stdout.write("[A]");
   const oldTags = change.fullDocumentBeforeChange?.tagList || [];
   const newTags = change.fullDocument?.tagList || [];
 
@@ -158,6 +161,7 @@ async function handleArticleChange(change, tagsCol) {
 
 // --- FAVORITES CHANGE HANDLER ---
 async function handleFavoriteChange(change, articlesCol) {
+  process.stdout.write("[F]");
   const operationType = change.operationType;
 
   if (operationType === "insert") {
@@ -181,32 +185,22 @@ async function handleFavoriteChange(change, articlesCol) {
   }
 }
 
-async function ensurePreAndPostImages(db, collectionNames) {
-  // Get existing collections (name only)
+async function ensurePreAndPostImages(db, collectionName) {
   const collections = await db
-    .listCollections({}, { nameOnly: true })
+    .listCollections({ name: collectionName }, { nameOnly: true })
     .toArray();
 
-  for (const collectionName of collectionNames) {
-    // Check if collection exists
-    const collectionExists = collections.some(
-      (col) => col.name === collectionName,
-    );
-
-    // Create collection if it doesn't exist
-    if (!collectionExists) {
-      await db.createCollection(collectionName, {
-        changeStreamPreAndPostImages: { enabled: true },
-      });
-      return;
-    }
-
-    // Ensure changeStreamPreAndPostImages is enabled
-    await db.command({
-      collMod: collectionName,
+  if (collections.length === 0) {
+    await db.createCollection(collectionName, {
       changeStreamPreAndPostImages: { enabled: true },
     });
+    return;
   }
+
+  await db.command({
+    collMod: collectionName,
+    changeStreamPreAndPostImages: { enabled: true },
+  });
 }
 
 main().catch((err) => {

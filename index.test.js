@@ -1,4 +1,4 @@
-import { before, after, beforeEach, describe, it } from "node:test";
+import { before, after, beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MongoClient, ObjectId } from "mongodb";
 import dotEnvExtended from "dotenv-extended";
@@ -7,6 +7,9 @@ dotEnvExtended.load();
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
+const TEST_TIMEOUT = process.env.TEST_TIMEOUT
+  ? parseInt(process.env.TEST_TIMEOUT)
+  : 10000;
 
 let client, db;
 
@@ -18,6 +21,17 @@ before(async () => {
 
 after(async () => {
   await client.close();
+});
+
+// Bail on first failure
+afterEach((t) => {
+  console.log("");
+  if (!t.passed) {
+    console.error(
+      `Bailing because test failed: [${t.name}], with error: ${t.error}`,
+    );
+    process.exit(1);
+  }
 });
 
 describe("RealWorld MongoDB Change Streams E2E", async () => {
@@ -283,7 +297,7 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
  * @param {number} interval ms
  * @param {number} timeout ms
  */
-async function waitFor(fn, interval = 100, timeout = 10000) {
+async function waitFor(fn, interval = 100, timeout = TEST_TIMEOUT) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (await fn()) return;
