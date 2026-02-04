@@ -13,6 +13,17 @@ const SHARD_INDEX = process.env.SHARD_INDEX
   ? parseInt(process.env.SHARD_INDEX)
   : 0;
 
+// Validate sharding configuration
+if (isNaN(SHARD_COUNT) || SHARD_COUNT < 1) {
+  throw new Error("SHARD_COUNT must be a positive number");
+}
+if (isNaN(SHARD_INDEX) || SHARD_INDEX < 0) {
+  throw new Error("SHARD_INDEX must be a non-negative number");
+}
+if (SHARD_INDEX >= SHARD_COUNT) {
+  throw new Error("SHARD_INDEX must be less than SHARD_COUNT");
+}
+
 const client = new MongoClient(MONGODB_URI);
 
 function createShardingPipeline(shardCount, shardIndex) {
@@ -29,6 +40,8 @@ function createShardingPipeline(shardCount, shardIndex) {
     },
   ];
 }
+
+const shardingPipeline = createShardingPipeline(SHARD_COUNT, SHARD_INDEX);
 
 async function main() {
   await client.connect();
@@ -49,8 +62,7 @@ async function main() {
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
-  const pipeline = createShardingPipeline(SHARD_COUNT, SHARD_INDEX);
-  const userStream = usersCollection.watch(pipeline, {
+  const userStream = usersCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     resumeAfter: userState?.resumeToken,
   });
@@ -76,7 +88,7 @@ async function main() {
   const articleState = await stateCollection.findOne({
     _id: "article_tag_sync",
   });
-  const articleStream = articlesCollection.watch(pipeline, {
+  const articleStream = articlesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: articleState?.resumeToken,
@@ -103,7 +115,7 @@ async function main() {
   const favoritesState = await stateCollection.findOne({
     _id: "favorites_count_sync",
   });
-  const favoritesStream = favoritesCollection.watch(pipeline, {
+  const favoritesStream = favoritesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: favoritesState?.resumeToken,
