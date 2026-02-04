@@ -34,10 +34,18 @@ jobs:
 
       - name: Initialize MongoDB replica set
         run: |
-          # Wait for MongoDB to be healthy
-          sleep 5
+          # Wait for MongoDB to be ready
+          for i in {1..30}; do
+            if docker exec ${{ job.services.mongodb.id }} mongosh --eval 'db.adminCommand({ ping: 1 })' &>/dev/null; then
+              echo "MongoDB is ready!"
+              break
+            fi
+            echo "Waiting for MongoDB to be ready..."
+            sleep 2
+          done
+          # Initialize replica set
           docker exec ${{ job.services.mongodb.id }} mongosh --eval "rs.initiate()"
-          # Wait for replica set initialization
+          # Wait for replica set to be initialized
           sleep 5
 
       - name: Install dependencies
