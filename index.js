@@ -161,7 +161,7 @@ async function handleArticleChange(change, tagsCol) {
 // --- FAVORITES CHANGE HANDLER ---
 async function handleFavoriteChange(change, articlesCol) {
   const operationType = change.operationType;
-  
+
   if (operationType === "insert") {
     // Favorite added: increment article's favoritesCount
     const articleId = change.fullDocument?.articleId;
