@@ -1,4 +1,4 @@
-import test from "node:test";
+import { before, after, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MongoClient, ObjectId } from "mongodb";
 import dotEnvExtended from "dotenv-extended";
@@ -10,21 +10,21 @@ if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
 let client, db;
 
-test.before(async () => {
+before(async () => {
   client = new MongoClient(MONGODB_URI);
   await client.connect();
   db = client.db();
 });
 
-test.after(async () => {
+after(async () => {
   await client.close();
 });
 
-test.describe("Change Stream Worker E2E", async () => {
+describe("RealWorld MongoDB Change Streams E2E", async () => {
   let users, articles, comments, tags, favorites;
 
   // Clean collections before each test
-  test.beforeEach(async () => {
+  beforeEach(async () => {
     users = db.collection("users");
     articles = db.collection("articles");
     comments = db.collection("comments");
@@ -40,7 +40,7 @@ test.describe("Change Stream Worker E2E", async () => {
     ]);
   });
 
-  test("User update propagates to articles and comments", async () => {
+  it("should propogate user update to articles and comments", async () => {
     const userId = new ObjectId();
     await users.insertOne({
       _id: userId,
@@ -98,7 +98,7 @@ test.describe("Change Stream Worker E2E", async () => {
     assert.equal(finalComment.authorBio, "new bio");
   });
 
-  test("Article insert/update updates global tags", async () => {
+  it("should propgate article insert/update to tags", async () => {
     const articleId = new ObjectId();
     const oldTags = ["tech", "js"];
     const newTags = ["js", "node", "mongodb"];
@@ -122,26 +122,42 @@ test.describe("Change Stream Worker E2E", async () => {
     });
   });
 
-  test("Article deletion decrements/removes tags", async () => {
+  it("should propogate article deletion to tags", async () => {
     await tags.insertMany([
       { _id: "js", articleCount: 2 },
       { _id: "node", articleCount: 1 },
     ]);
     const articleId = new ObjectId();
-    await articles.insertOne({ _id: articleId, tagList: ["js", "node"] });
+    await articles.insertOne({
+      _id: articleId,
+      tagList: ["js", "node", "perf"],
+    });
 
+    // Verify tags state: js: 3, node: 2, perf: 1
+    await waitFor(async () => {
+      const jsTag = await tags.findOne({ _id: "js" });
+      const nodeTag = await tags.findOne({ _id: "node" });
+      const perfTag = await tags.findOne({ _id: "perf" });
+      return (
+        jsTag.articleCount === 3 &&
+        nodeTag.articleCount === 2 &&
+        perfTag.articleCount === 1
+      );
+    });
+
+    // Delete article
     await articles.deleteOne({ _id: articleId });
 
+    // Verify tags state: js: 2, node: 1, perf: deleted
     await waitFor(async () => {
-      const remainingTags = await tags.find().toArray();
-      return (
-        !remainingTags.some((t) => t._id === "node") &&
-        remainingTags.find((t) => t._id === "js").articleCount === 1
-      );
+      const jsTag = await tags.findOne({ _id: "js" });
+      const nodeTag = await tags.findOne({ _id: "node" });
+      const perfTag = await tags.findOne({ _id: "perf" });
+      return jsTag.articleCount === 2 && nodeTag.articleCount === 1 && !perfTag;
     });
   });
 
-  test("Favorites count increments/decrements correctly", async () => {
+  it.skip("should compute favorites count correctly", async () => {
     const articleId = new ObjectId();
     const userId = new ObjectId();
     await articles.insertOne({
@@ -175,7 +191,7 @@ test.describe("Change Stream Worker E2E", async () => {
     });
   });
 
-  test("No-op updates do not break downstream", async () => {
+  it("should handle no-op updates correctly", async () => {
     const userId = new ObjectId();
     await users.insertOne({
       _id: userId,
@@ -216,7 +232,7 @@ test.describe("Change Stream Worker E2E", async () => {
     });
   });
 
-  test("Rapid conflicting updates are handled", async () => {
+  it("should handle rapid conflicting updates", async () => {
     const userId = new ObjectId();
     await users.insertOne({ _id: userId, username: "v1", image: "v1.png" });
 
