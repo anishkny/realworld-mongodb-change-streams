@@ -16,11 +16,13 @@ async function main() {
   const articlesCollection = db.collection("articles");
   const commentsCollection = db.collection("comments");
   const tagsCollection = db.collection("tags");
+  const favoritesCollection = db.collection("favorites");
   const stateCollection = db.collection("sync_state");
 
   // Enable changeStreamPreAndPostImages for users and articles collections
   await ensurePreAndPostImages(db, "users");
   await ensurePreAndPostImages(db, "articles");
+  await ensurePreAndPostImages(db, "favorites");
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
@@ -73,6 +75,33 @@ async function main() {
     }
   })();
 
+  // --- FAVORITES STREAM ---
+  const favoritesState = await stateCollection.findOne({
+    _id: "favorites_count_sync",
+  });
+  const favoritesStream = favoritesCollection.watch([], {
+    fullDocument: "updateLookup",
+    fullDocumentBeforeChange: "required",
+    resumeAfter: favoritesState?.resumeToken,
+  });
+
+  (async () => {
+    console.log("Watching favorites for articles count...");
+    for await (const change of favoritesStream) {
+      try {
+        await handleFavoriteChange(change, articlesCollection);
+        // save resume token
+        await stateCollection.updateOne(
+          { _id: "favorites_count_sync" },
+          { $set: { resumeToken: change._id } },
+          { upsert: true },
+        );
+      } catch (err) {
+        console.error("Favorite change processing error:", err);
+      }
+    }
+  })();
+
   console.log("Change streams set up and running.");
 }
 
@@ -83,6 +112,7 @@ function profileChanged(change) {
 }
 
 async function handleUserChange(change, articlesCol, commentsCol) {
+  process.stdout.write("[U]");
   if (!profileChanged(change)) return;
   const userId = change.documentKey._id;
   const { username, image, bio } = change.fullDocument;
@@ -93,7 +123,6 @@ async function handleUserChange(change, articlesCol, commentsCol) {
   if (bio) update.authorBio = bio;
   if (Object.keys(update).length === 0) return;
 
-  console.log(`Syncing profile for user ${userId}`);
   await Promise.all([
     articlesCol.updateMany({ authorId: userId }, { $set: update }),
     commentsCol.updateMany({ authorId: userId }, { $set: update }),
@@ -102,6 +131,7 @@ async function handleUserChange(change, articlesCol, commentsCol) {
 
 // --- ARTICLES CHANGE HANDLER (tags) ---
 async function handleArticleChange(change, tagsCol) {
+  process.stdout.write("[A]");
   const oldTags = change.fullDocumentBeforeChange?.tagList || [];
   const newTags = change.fullDocument?.tagList || [];
 
@@ -125,6 +155,32 @@ async function handleArticleChange(change, tagsCol) {
     );
     if (res?.articleCount <= 0) {
       await tagsCol.deleteOne({ _id: t });
+    }
+  }
+}
+
+// --- FAVORITES CHANGE HANDLER ---
+async function handleFavoriteChange(change, articlesCol) {
+  process.stdout.write("[F]");
+  const operationType = change.operationType;
+
+  if (operationType === "insert") {
+    // Favorite added: increment article's favoritesCount
+    const articleId = change.fullDocument?.articleId;
+    if (articleId) {
+      await articlesCol.updateOne(
+        { _id: articleId },
+        { $inc: { favoritesCount: 1 } },
+      );
+    }
+  } else if (operationType === "delete") {
+    // Favorite removed: decrement article's favoritesCount
+    const articleId = change.fullDocumentBeforeChange?.articleId;
+    if (articleId) {
+      await articlesCol.updateOne(
+        { _id: articleId },
+        { $inc: { favoritesCount: -1 } },
+      );
     }
   }
 }

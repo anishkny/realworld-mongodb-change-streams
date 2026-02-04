@@ -1,4 +1,4 @@
-import { before, after, beforeEach, describe, it } from "node:test";
+import { before, after, beforeEach, afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MongoClient, ObjectId } from "mongodb";
 import dotEnvExtended from "dotenv-extended";
@@ -7,6 +7,9 @@ dotEnvExtended.load();
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
+const TEST_TIMEOUT = process.env.TEST_TIMEOUT
+  ? parseInt(process.env.TEST_TIMEOUT)
+  : 10000;
 
 let client, db;
 
@@ -18,6 +21,17 @@ before(async () => {
 
 after(async () => {
   await client.close();
+});
+
+// Bail on first failure
+afterEach((t) => {
+  console.log("");
+  if (!t.passed) {
+    console.error(
+      `Bailing because test failed: [${t.name}], with error: ${t.error}`,
+    );
+    process.exit(1);
+  }
 });
 
 describe("RealWorld MongoDB Change Streams E2E", async () => {
@@ -157,7 +171,7 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
     });
   });
 
-  it.skip("should compute favorites count correctly", async () => {
+  it("should compute favorites count correctly", async () => {
     const articleId = new ObjectId();
     const userId = new ObjectId();
     await articles.insertOne({
@@ -168,11 +182,6 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
 
     // Simulate favorite
     await favorites.insertOne({ articleId, userId });
-    await articles.updateOne(
-      { _id: articleId },
-      { $inc: { favoritesCount: 1 } },
-    ); // normally handled by worker
-
     await waitFor(async () => {
       const a = await articles.findOne({ _id: articleId });
       return a.favoritesCount === 1;
@@ -180,14 +189,33 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
 
     // Simulate unfavorite
     await favorites.deleteOne({ articleId, userId });
-    await articles.updateOne(
-      { _id: articleId },
-      { $inc: { favoritesCount: -1 } },
-    ); // normally handled by worker
-
     await waitFor(async () => {
       const a = await articles.findOne({ _id: articleId });
       return a.favoritesCount === 0;
+    });
+
+    // Simulate 10 favorites
+    const favOps = [];
+    for (let i = 0; i < 10; i++) {
+      favOps.push(favorites.insertOne({ articleId, userId: new ObjectId() }));
+    }
+    await Promise.all(favOps);
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      return a.favoritesCount === 10;
+    });
+
+    // Simulate 7 unfavorites
+    const unfavOps = [];
+    for (let i = 0; i < 7; i++) {
+      unfavOps.push(
+        favorites.deleteOne({ articleId, userId: { $exists: true } }),
+      );
+    }
+    await Promise.all(unfavOps);
+    await waitFor(async () => {
+      const a = await articles.findOne({ _id: articleId });
+      return a.favoritesCount === 3;
     });
   });
 
@@ -269,11 +297,19 @@ describe("RealWorld MongoDB Change Streams E2E", async () => {
  * @param {number} interval ms
  * @param {number} timeout ms
  */
-async function waitFor(fn, interval = 100, timeout = 10000) {
+async function waitFor(fn, interval = 100, timeout = TEST_TIMEOUT) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (await fn()) return;
     await new Promise((res) => setTimeout(res, interval));
   }
   throw new Error("Timeout waiting for condition");
+}
+
+async function deleteCollections(collections) {
+  return Promise.all(
+    collections.map(async (col) => {
+      await col.deleteMany({});
+    }),
+  );
 }
