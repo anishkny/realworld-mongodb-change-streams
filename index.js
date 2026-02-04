@@ -22,6 +22,7 @@ async function main() {
   // Enable changeStreamPreAndPostImages for users and articles collections
   await ensurePreAndPostImages(db, "users");
   await ensurePreAndPostImages(db, "articles");
+  await ensurePreAndPostImages(db, "favorites");
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
@@ -80,6 +81,7 @@ async function main() {
   });
   const favoritesStream = favoritesCollection.watch([], {
     fullDocument: "updateLookup",
+    fullDocumentBeforeChange: "required",
     resumeAfter: favoritesState?.resumeToken,
   });
 
@@ -171,7 +173,7 @@ async function handleFavoriteChange(change, articlesCol) {
     }
   } else if (operationType === "delete") {
     // Favorite removed: decrement article's favoritesCount
-    const articleId = change.documentKey?.articleId;
+    const articleId = change.fullDocumentBeforeChange?.articleId;
     if (articleId) {
       await articlesCol.updateOne(
         { _id: articleId },
