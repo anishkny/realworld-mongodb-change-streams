@@ -24,7 +24,7 @@ jobs:
           cache: 'npm'
 
       - name: Start MongoDB
-        run: ./start-mongodb.sh
+        run: npm run start:mongodb
 
       - name: Install dependencies
         run: npm install
