@@ -1,6 +1,7 @@
 {
   "type": "module",
   "scripts": {
+    "start:mongodb": "./start-mongodb.sh",
     "start": "node index.js",
     "test:only": "node --test index.test.js",
     "test": "./start-and-test.sh"
