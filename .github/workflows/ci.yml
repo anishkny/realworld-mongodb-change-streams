@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --replSet rs0
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Initialize MongoDB replica set
+        run: |
+          # Wait for MongoDB to be healthy
+          sleep 5
+          docker exec ${{ job.services.mongodb.id }} mongosh --eval "rs.initiate()"
+          # Wait for replica set initialization
+          sleep 5
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
