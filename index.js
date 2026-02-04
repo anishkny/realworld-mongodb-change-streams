@@ -6,7 +6,30 @@ dotEnvExtended.load();
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
+const SHARD_COUNT = process.env.SHARD_COUNT
+  ? parseInt(process.env.SHARD_COUNT)
+  : 4;
+const SHARD_INDEX = process.env.SHARD_INDEX
+  ? parseInt(process.env.SHARD_INDEX)
+  : 0;
+
 const client = new MongoClient(MONGODB_URI);
+
+function createShardingPipeline(shardCount, shardIndex) {
+  return [
+    {
+      $match: {
+        $expr: {
+          $eq: [
+            { $mod: [{ $toHashedIndexKey: "$documentKey._id" }, shardCount] },
+            shardIndex,
+          ],
+        },
+      },
+    },
+  ];
+}
+
 async function main() {
   await client.connect();
   console.log("Connected to MongoDB Atlas");
@@ -26,7 +49,8 @@ async function main() {
 
   // --- USERS STREAM ---
   const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
-  const userStream = usersCollection.watch([], {
+  const pipeline = createShardingPipeline(SHARD_COUNT, SHARD_INDEX);
+  const userStream = usersCollection.watch(pipeline, {
     fullDocument: "updateLookup",
     resumeAfter: userState?.resumeToken,
   });
@@ -52,7 +76,7 @@ async function main() {
   const articleState = await stateCollection.findOne({
     _id: "article_tag_sync",
   });
-  const articleStream = articlesCollection.watch([], {
+  const articleStream = articlesCollection.watch(pipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: articleState?.resumeToken,
@@ -79,7 +103,7 @@ async function main() {
   const favoritesState = await stateCollection.findOne({
     _id: "favorites_count_sync",
   });
-  const favoritesStream = favoritesCollection.watch([], {
+  const favoritesStream = favoritesCollection.watch(pipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: favoritesState?.resumeToken,
