@@ -48,7 +48,7 @@ const shardingPipeline = createShardingPipeline(SHARD_COUNT, SHARD_INDEX);
 
 async function main() {
   await client.connect();
-  console.log("Connected to MongoDB Atlas");
+  console.log(`Connected to MongoDB Atlas (Shard ${SHARD_INDEX}/${SHARD_COUNT})`);
 
   const db = client.db();
   const usersCollection = db.collection("users");
@@ -141,7 +141,7 @@ async function main() {
     }
   })();
 
-  console.log("Change streams set up and running.");
+  console.log(`Change streams set up and running. (Shard ${SHARD_INDEX}/${SHARD_COUNT})`);
 }
 
 // --- USERS CHANGE HANDLER ---
