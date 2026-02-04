@@ -4,7 +4,6 @@ set -euxo pipefail
 # Configuration
 MONGODB_CONTAINER_NAME="mongo-local"
 MONGODB_PORT=27017
-MONGODB_LOG="node_modules/mongodb.log"
 
 # Pull latest MongoDB image
 docker pull mongo:latest
@@ -13,12 +12,12 @@ docker pull mongo:latest
 docker rm -f "$MONGODB_CONTAINER_NAME" || true
 
 # Start MongoDB container with replica set configuration
-docker run --name "$MONGODB_CONTAINER_NAME" -p "$MONGODB_PORT":"$MONGODB_PORT" mongo:latest --replSet rs0 2>&1 > "$MONGODB_LOG" &
+docker run --name "$MONGODB_CONTAINER_NAME" -p "$MONGODB_PORT":"$MONGODB_PORT" mongo:latest --replSet rs0 &
 
 # Poll until MongoDB is ready
 is_ready=false
 for i in {1..30}; do
-  if docker exec "$MONGODB_CONTAINER_NAME" mongosh --eval 'db.adminCommand({ ping: 1 })' &>/dev/null; then
+  if docker exec "$MONGODB_CONTAINER_NAME" mongosh --eval 'db.adminCommand({ ping: 1 })'; then
     echo "MongoDB is ready!"
     is_ready=true
     break
