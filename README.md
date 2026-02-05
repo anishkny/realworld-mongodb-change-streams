@@ -174,23 +174,13 @@ For most applications, a single worker is sufficient. Consider sharding when pro
 
 ## Testing
 
-End-to-end tests use a real MongoDB instance and assume the worker is already running.
-
-### Basic testing (single worker)
+End-to-end tests use a real MongoDB instance with sharded workers:
 
 ```bash
 npm test
 ```
 
-### Testing with sharding
-
-The test suite can be run with multiple shards to validate the sharding mechanism:
-
-```bash
-./start-and-test.sh
-```
-
-This script:
+This runs `start-and-test.sh`, which:
 1. Starts 4 worker shards (SHARD_COUNT=4, SHARD_INDEX=0-3)
 2. Waits for all shards to be ready
 3. Runs the test suite against all shards
