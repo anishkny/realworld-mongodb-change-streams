@@ -21,6 +21,7 @@ A minimal but realistic pattern for MongoDB-backed applications that:
 - Maintain a global tag list
 - Keep derived counters like favoritesCount correct
 - Accept eventual consistency and repair it asynchronously
+- Scale horizontally through sharding for high-throughput scenarios
 
 All updates are driven by MongoDB change streams, not application code.
 
@@ -76,17 +77,114 @@ This is the tradeoff used by most high-scale MongoDB systems.
 
 The worker attaches to MongoDB and begins reacting to changes immediately once started.
 
+### Single worker
+
 ```bash
 npm start
 ```
 
+### Running with sharding
+
+For high-throughput scenarios, you can run multiple worker instances that partition the workload based on document IDs. Each shard processes a subset of changes, allowing for horizontal scaling.
+
+#### How sharding works
+
+The sharding mechanism uses a modulo-based distribution:
+
+1. Each change event's document ID is hashed
+2. The hash modulo `SHARD_COUNT` determines which shard handles that event
+3. Each worker only processes events where `hash(documentKey._id) % SHARD_COUNT == SHARD_INDEX`
+
+This ensures:
+- Each document is processed by exactly one worker
+- No coordination between workers is needed
+- Load is distributed evenly across shards
+
+#### Configuration
+
+Set these environment variables to control sharding:
+
+- `SHARD_COUNT` - Total number of shards (default: 1)
+- `SHARD_INDEX` - This worker's shard number, from 0 to SHARD_COUNT-1 (default: 0)
+
+#### Example: Running 4 shards
+
+Start each shard in a separate terminal or process:
+
+```bash
+# Terminal 1 - Shard 0
+SHARD_INDEX=0 SHARD_COUNT=4 npm start
+
+# Terminal 2 - Shard 1
+SHARD_INDEX=1 SHARD_COUNT=4 npm start
+
+# Terminal 3 - Shard 2
+SHARD_INDEX=2 SHARD_COUNT=4 npm start
+
+# Terminal 4 - Shard 3
+SHARD_INDEX=3 SHARD_COUNT=4 npm start
+```
+
+Each worker will display its shard configuration on startup:
+```
+Connected to MongoDB Atlas (Shard 0/4)
+```
+
+#### Example: Running shards with Docker Compose
+
+You can also use Docker Compose or process managers to run multiple shards:
+
+```yaml
+services:
+  worker-0:
+    build: .
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/conduit?replicaSet=rs0
+      - SHARD_INDEX=0
+      - SHARD_COUNT=4
+  worker-1:
+    build: .
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/conduit?replicaSet=rs0
+      - SHARD_INDEX=1
+      - SHARD_COUNT=4
+  worker-2:
+    build: .
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/conduit?replicaSet=rs0
+      - SHARD_INDEX=2
+      - SHARD_COUNT=4
+  worker-3:
+    build: .
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/conduit?replicaSet=rs0
+      - SHARD_INDEX=3
+      - SHARD_COUNT=4
+```
+
+#### When to use sharding
+
+Use multiple shards when:
+- Change event volume exceeds what one worker can process
+- You need higher throughput for propagating changes
+- CPU or network becomes a bottleneck on a single worker
+- You want redundancy (though each shard handles different documents)
+
+For most applications, a single worker is sufficient. Consider sharding when processing thousands of changes per second.
+
 ## Testing
 
-End-to-end tests use a real MongoDB instance and assume the worker is already running.
+End-to-end tests use a real MongoDB instance with sharded workers:
 
 ```bash
 npm test
 ```
+
+This runs `start-and-test.sh`, which:
+1. Starts 4 worker shards (SHARD_COUNT=4, SHARD_INDEX=0-3)
+2. Waits for all shards to be ready
+3. Runs the test suite against all shards
+4. Cleans up all worker processes
 
 Tests validate that:
 
@@ -94,6 +192,7 @@ Tests validate that:
 - Updating article tags updates the global tag list
 - Adding or removing favorites updates favoritesCount
 - Rapid or conflicting updates converge correctly
+- Multiple shards correctly partition and process changes without conflicts
 
 ## What this is not
 
