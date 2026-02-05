@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+set -euo pipefail
+if [ -n "${CI:-}" ]; then set -x; fi
 
 SHARD_COUNT=4
-
 SHARD_PIDS=()
 
 cleanup() {
@@ -12,7 +12,6 @@ cleanup() {
     fi
   done
 }
-
 trap cleanup ERR EXIT
 
 # Start all shards
@@ -27,7 +26,7 @@ is_ready=false
 for attempt in {1..10}; do
   ready_count=0
   for i in $(seq 0 $((SHARD_COUNT - 1))); do
-    if grep -q "Change streams set up and running. (Shard $i/$SHARD_COUNT)" "node_modules/app-shard-$i.log" 2>/dev/null; then
+    if grep -q "__READY__SHARD__${i}_OF_${SHARD_COUNT}__" "node_modules/app-shard-$i.log" 2>/dev/null; then
       ((ready_count++)) || true
     fi
   done
