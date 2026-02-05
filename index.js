@@ -6,10 +6,15 @@ dotEnvExtended.load();
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) throw new Error("Missing MONGODB_URI");
 
+const { SHARD_INDEX, SHARD_COUNT } = getShardConfig(process.env);
+
 const client = new MongoClient(MONGODB_URI);
+
 async function main() {
   await client.connect();
-  console.log("Connected to MongoDB Atlas");
+  console.log(
+    `Connected to MongoDB Atlas (Shard ${SHARD_INDEX}/${SHARD_COUNT})`,
+  );
 
   const db = client.db();
   const usersCollection = db.collection("users");
@@ -24,21 +29,23 @@ async function main() {
   await ensurePreAndPostImages(db, "articles");
   await ensurePreAndPostImages(db, "favorites");
 
+  const shardingPipeline = createShardingPipeline(SHARD_COUNT, SHARD_INDEX);
+
   // --- USERS STREAM ---
-  const userState = await stateCollection.findOne({ _id: "user_profile_sync" });
-  const userStream = usersCollection.watch([], {
+  const userStateId = `user_profile_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
+  const userState = await stateCollection.findOne({ _id: userStateId });
+  const userStream = usersCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     resumeAfter: userState?.resumeToken,
   });
 
   (async () => {
-    console.log("Watching user updates...");
     for await (const change of userStream) {
       try {
         await handleUserChange(change, articlesCollection, commentsCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "user_profile_sync" },
+          { _id: userStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
@@ -49,23 +56,23 @@ async function main() {
   })();
 
   // --- ARTICLES STREAM ---
+  const articleStateId = `article_tag_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
   const articleState = await stateCollection.findOne({
-    _id: "article_tag_sync",
+    _id: articleStateId,
   });
-  const articleStream = articlesCollection.watch([], {
+  const articleStream = articlesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: articleState?.resumeToken,
   });
 
   (async () => {
-    console.log("Watching article updates for tags...");
     for await (const change of articleStream) {
       try {
         await handleArticleChange(change, tagsCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "article_tag_sync" },
+          { _id: articleStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
@@ -76,23 +83,23 @@ async function main() {
   })();
 
   // --- FAVORITES STREAM ---
+  const favoritesStateId = `favorites_count_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
   const favoritesState = await stateCollection.findOne({
-    _id: "favorites_count_sync",
+    _id: favoritesStateId,
   });
-  const favoritesStream = favoritesCollection.watch([], {
+  const favoritesStream = favoritesCollection.watch(shardingPipeline, {
     fullDocument: "updateLookup",
     fullDocumentBeforeChange: "required",
     resumeAfter: favoritesState?.resumeToken,
   });
 
   (async () => {
-    console.log("Watching favorites for articles count...");
     for await (const change of favoritesStream) {
       try {
         await handleFavoriteChange(change, articlesCollection);
         // save resume token
         await stateCollection.updateOne(
-          { _id: "favorites_count_sync" },
+          { _id: favoritesStateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
@@ -102,7 +109,7 @@ async function main() {
     }
   })();
 
-  console.log("Change streams set up and running.");
+  console.log(`__READY__SHARD__${SHARD_INDEX}_OF_${SHARD_COUNT}__`);
 }
 
 // --- USERS CHANGE HANDLER ---
@@ -112,7 +119,7 @@ function profileChanged(change) {
 }
 
 async function handleUserChange(change, articlesCol, commentsCol) {
-  process.stdout.write("[U]");
+  process.stdout.write(`U@${SHARD_INDEX}/${SHARD_COUNT} `);
   if (!profileChanged(change)) return;
   const userId = change.documentKey._id;
   const { username, image, bio } = change.fullDocument;
@@ -131,7 +138,7 @@ async function handleUserChange(change, articlesCol, commentsCol) {
 
 // --- ARTICLES CHANGE HANDLER (tags) ---
 async function handleArticleChange(change, tagsCol) {
-  process.stdout.write("[A]");
+  process.stdout.write(`A@${SHARD_INDEX}/${SHARD_COUNT} `);
   const oldTags = change.fullDocumentBeforeChange?.tagList || [];
   const newTags = change.fullDocument?.tagList || [];
 
@@ -161,7 +168,7 @@ async function handleArticleChange(change, tagsCol) {
 
 // --- FAVORITES CHANGE HANDLER ---
 async function handleFavoriteChange(change, articlesCol) {
-  process.stdout.write("[F]");
+  process.stdout.write(`F@${SHARD_INDEX}/${SHARD_COUNT} `);
   const operationType = change.operationType;
 
   if (operationType === "insert") {
@@ -201,6 +208,50 @@ async function ensurePreAndPostImages(db, collectionName) {
     collMod: collectionName,
     changeStreamPreAndPostImages: { enabled: true },
   });
+}
+
+function getShardConfig(env) {
+  const shardCount = env.SHARD_COUNT ? parseInt(env.SHARD_COUNT) : 1;
+  const shardIndex = env.SHARD_INDEX ? parseInt(env.SHARD_INDEX) : 0;
+
+  // Validate sharding configuration
+  if (isNaN(shardCount) || shardCount < 1) {
+    throw new Error("SHARD_COUNT must be a positive number");
+  }
+  if (isNaN(shardIndex) || shardIndex < 0) {
+    throw new Error("SHARD_INDEX must be a non-negative number");
+  }
+  if (shardIndex >= shardCount) {
+    throw new Error("SHARD_INDEX must be less than SHARD_COUNT");
+  }
+
+  return { SHARD_COUNT: shardCount, SHARD_INDEX: shardIndex };
+}
+
+function createShardingPipeline(shardCount, shardIndex) {
+  return shardCount == 1
+    ? []
+    : [
+        {
+          $match: {
+            $expr: {
+              $eq: [
+                {
+                  $mod: [
+                    {
+                      $abs: {
+                        $toLong: { $toHashedIndexKey: "$documentKey._id" },
+                      },
+                    },
+                    shardCount,
+                  ],
+                },
+                shardIndex,
+              ],
+            },
+          },
+        },
+      ];
 }
 
 main().catch((err) => {
