@@ -33,83 +33,81 @@ async function main() {
 
   // --- USERS STREAM ---
   const userStateId = `user_profile_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
-  const userState = await stateCollection.findOne({ _id: userStateId });
-  const userStream = usersCollection.watch(shardingPipeline, {
-    fullDocument: "updateLookup",
-    resumeAfter: userState?.resumeToken,
+  await startChangeStream({
+    collection: usersCollection,
+    stateCollection,
+    stateId: userStateId,
+    pipeline: shardingPipeline,
+    watchOptions: { fullDocument: "updateLookup" },
+    handleChange: (change) =>
+      handleUserChange(change, articlesCollection, commentsCollection),
+    errorLabel: "User",
   });
-
-  (async () => {
-    for await (const change of userStream) {
-      try {
-        await handleUserChange(change, articlesCollection, commentsCollection);
-        // save resume token
-        await stateCollection.updateOne(
-          { _id: userStateId },
-          { $set: { resumeToken: change._id } },
-          { upsert: true },
-        );
-      } catch (err) {
-        console.error("User change processing error:", err);
-      }
-    }
-  })();
 
   // --- ARTICLES STREAM ---
   const articleStateId = `article_tag_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
-  const articleState = await stateCollection.findOne({
-    _id: articleStateId,
+  await startChangeStream({
+    collection: articlesCollection,
+    stateCollection,
+    stateId: articleStateId,
+    pipeline: shardingPipeline,
+    watchOptions: {
+      fullDocument: "updateLookup",
+      fullDocumentBeforeChange: "required",
+    },
+    handleChange: (change) => handleArticleChange(change, tagsCollection),
+    errorLabel: "Article",
   });
-  const articleStream = articlesCollection.watch(shardingPipeline, {
-    fullDocument: "updateLookup",
-    fullDocumentBeforeChange: "required",
-    resumeAfter: articleState?.resumeToken,
-  });
-
-  (async () => {
-    for await (const change of articleStream) {
-      try {
-        await handleArticleChange(change, tagsCollection);
-        // save resume token
-        await stateCollection.updateOne(
-          { _id: articleStateId },
-          { $set: { resumeToken: change._id } },
-          { upsert: true },
-        );
-      } catch (err) {
-        console.error("Article change processing error:", err);
-      }
-    }
-  })();
 
   // --- FAVORITES STREAM ---
   const favoritesStateId = `favorites_count_sync_shard_${SHARD_INDEX}_of_${SHARD_COUNT}`;
-  const favoritesState = await stateCollection.findOne({
-    _id: favoritesStateId,
+  await startChangeStream({
+    collection: favoritesCollection,
+    stateCollection,
+    stateId: favoritesStateId,
+    pipeline: shardingPipeline,
+    watchOptions: {
+      fullDocument: "updateLookup",
+      fullDocumentBeforeChange: "required",
+    },
+    handleChange: (change) => handleFavoriteChange(change, articlesCollection),
+    errorLabel: "Favorite",
   });
-  const favoritesStream = favoritesCollection.watch(shardingPipeline, {
-    fullDocument: "updateLookup",
-    fullDocumentBeforeChange: "required",
-    resumeAfter: favoritesState?.resumeToken,
+
+  console.log(`__READY__SHARD__${SHARD_INDEX}_OF_${SHARD_COUNT}__`);
+}
+
+// --- GENERIC CHANGE STREAM STARTER ---
+async function startChangeStream({
+  collection,
+  stateCollection,
+  stateId,
+  pipeline,
+  watchOptions,
+  handleChange,
+  errorLabel,
+}) {
+  const state = await stateCollection.findOne({ _id: stateId });
+  const stream = collection.watch(pipeline, {
+    ...watchOptions,
+    resumeAfter: state?.resumeToken,
   });
 
   (async () => {
-    for await (const change of favoritesStream) {
+    for await (const change of stream) {
       try {
-        await handleFavoriteChange(change, articlesCollection);
+        await handleChange(change);
         // save resume token
         await stateCollection.updateOne(
-          { _id: favoritesStateId },
+          { _id: stateId },
           { $set: { resumeToken: change._id } },
           { upsert: true },
         );
       } catch (err) {
-        console.error("Favorite change processing error:", err);
+        console.error(`${errorLabel} change processing error:`, err);
       }
     }
   })();
-
-  console.log(`__READY__SHARD__${SHARD_INDEX}_OF_${SHARD_COUNT}__`);
 }
 
 // --- USERS CHANGE HANDLER ---
