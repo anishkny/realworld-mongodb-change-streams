@@ -2,6 +2,7 @@
   "type": "module",
   "scripts": {
     "start:mongodb": "./start-mongodb.sh",
+    "stop:mongodb": "docker rm -f mongo-local || true",
     "start": "node index.js",
     "test:only": "node --test index.test.js",
     "test": "./start-and-test.sh"
