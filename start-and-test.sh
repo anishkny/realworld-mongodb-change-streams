@@ -2,8 +2,13 @@
 set -euo pipefail
 if [ -n "${CI:-}" ]; then set -x; fi
 
+TMPDIR="${RUNNER_TEMP:-/tmp}"
 SHARD_COUNT=4
 SHARD_PIDS=()
+
+shard_log_file() {
+  echo "$TMPDIR/app-shard-$1.log"
+}
 
 cleanup() {
   for pid in "${SHARD_PIDS[@]}"; do
@@ -16,7 +21,7 @@ trap cleanup ERR EXIT
 
 # Start all shards
 for i in $(seq 0 $((SHARD_COUNT - 1))); do
-  SHARD_INDEX=$i SHARD_COUNT=$SHARD_COUNT npm start > >(tee "node_modules/app-shard-$i.log") 2>&1 &
+  SHARD_INDEX=$i SHARD_COUNT=$SHARD_COUNT npm start > >(tee "$(shard_log_file "$i")") 2>&1 &
   SHARD_PIDS+=($!)
   echo "Started shard $i with PID ${SHARD_PIDS[$i]}"
 done
@@ -26,7 +31,7 @@ is_ready=false
 for attempt in {1..10}; do
   ready_count=0
   for i in $(seq 0 $((SHARD_COUNT - 1))); do
-    if grep -q "__READY__SHARD__${i}_OF_${SHARD_COUNT}__" "node_modules/app-shard-$i.log" 2>/dev/null; then
+    if grep -q "__READY__SHARD__${i}_OF_${SHARD_COUNT}__" "$(shard_log_file "$i")" 2>/dev/null; then
       ((ready_count++)) || true
     fi
   done
